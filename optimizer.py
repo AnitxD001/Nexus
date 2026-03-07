@@ -10,7 +10,7 @@ def optimize_production(freq, price, target, Pmax):
     freq_surplus = [f - 50 for f in freq]
     w1=-1
     w2=1
-    startup_cost=120
+    startup_cost=600
     # normalization function
     def normalize(arr):
         mn = min(arr)

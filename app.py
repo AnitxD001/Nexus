@@ -2,6 +2,8 @@ import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
+from optimizer import optimize_production
+from orchestrator import audit_dispatch
 
 # 1. PAGE SETUP (Must be first)
 st.set_page_config(page_title="Hydrogen Plant Dashboard", layout="wide", initial_sidebar_state="collapsed")
@@ -32,6 +34,13 @@ with col_left:
         target_prod = st.slider("Target Production (kg)", min_value=100, max_value=1000, value=600, step=10)
         capacity = st.number_input("Electrolyzer Capacity (MW)", value=30.0, step=1.0)
         
+        # OEM Safety Manual Upload
+        uploaded_manual = st.file_uploader("Upload OEM Safety Manual", type=["pdf"])
+        
+        # Optional: Add a visual indicator if a file is successfully loaded
+        if uploaded_manual is not None:
+            st.success("Manual loaded for AI Audit", icon="✅")
+            
         st.divider()
         
         # Output Metrics
@@ -45,13 +54,30 @@ with col_right:
     st.title("Hydrogen Plant Dashboard")
     
     # --- TOP RIGHT: The Linear Programming Chart ---
+    # --- TOP RIGHT: The Linear Programming Chart ---
     with st.container(border=True):
-        # Generate dummy data representing the LP inputs/outputs
-        hours = list(range(25))
-        grid_price = np.random.uniform(2, 8, 25) # Price in ₹/kWh
-        renewable_forecast = np.random.uniform(0, 30, 25) # Solar/Wind MW
-        lp_dispatch_status = np.random.choice([0, 1], size=25, p=[0.4, 0.6]) # ON/OFF Schedule
         
+        hours = list(range(24))
+        
+        # 1. Generate 24-hour forecast data (converted to standard Python lists for PuLP)
+        grid_price = np.random.uniform(2, 8, 24).tolist()
+        
+        # The optimizer centers around 50Hz, so we generate forecast data between 49.5 and 50.5
+        grid_freq = np.random.uniform(49.5, 50.5, 24).tolist() 
+        
+        # 2. THE MAGIC CONNECTION: Feed UI inputs into the Math Engine
+        # Pmax (Capacity) and target (Target Production) come directly from your Streamlit sidebar
+        optimal_production = optimize_production(grid_freq, grid_price, target_prod, capacity)
+        #st.write(optimal_production)
+        
+        # 3. Convert production amounts to a fractional value for plotting
+        #    and to a binary ON/OFF schedule for the safety auditor
+        lp_dispatch_frac = [(p / capacity) for p in optimal_production]
+        lp_dispatch_binary = [1 if p > 0 else 0 for p in optimal_production]
+        with st.spinner("AI Agent auditing schedule against OEM safety constraints..."):
+            audit_report = audit_dispatch(lp_dispatch_binary, max_starts=2)
+
+        # --- BEGIN PLOTLY CHART CODE ---
         fig = make_subplots(specs=[[{"secondary_y": True}]])
         
         # Trace 1: Grid Price (Red Line)
@@ -59,16 +85,18 @@ with col_right:
             go.Scatter(x=hours, y=grid_price, name="Grid Price (₹/kWh)", line=dict(color="#ef4444", width=2)),
             secondary_y=False,
         )
-        # Trace 2: Renewable Forecast (Blue Area)
+        # Trace 2: Grid Frequency / Renewables (Blue Area)
         fig.add_trace(
-            go.Scatter(x=hours, y=renewable_forecast, name="Renewables (MW)", fill='tozeroy', line=dict(color="#3b82f6", width=0), opacity=0.3),
+            go.Scatter(x=hours, y=grid_freq, name="Grid Frequency (Hz)", line=dict(color="#3b82f6", width=2),),
             secondary_y=False,
         )
         # Trace 3: LP Optimized Dispatch (Green Step Chart)
         fig.add_trace(
-            go.Scatter(x=hours, y=lp_dispatch_status, name="Electrolyzer ON", line=dict(color="#10b981", shape='hv', width=3)),
+            go.Scatter(x=hours, y=lp_dispatch_frac, name="Electrolyzer ON", line=dict(color="#10b981", shape='hv', width=3)),
             secondary_y=True,
         )
+        
+        # ... (Keep the rest of the fig.update_layout code exactly as it was) ...
         
         fig.update_layout(
             template="plotly_dark",
@@ -105,6 +133,14 @@ with col_right:
     with bot4:
         with st.container(border=True):
             st.markdown("<p style='font-size: 14px; color: #a1a1aa; margin-bottom: 0;'>AI Chatbot</p>", unsafe_allow_html=True)
+            
+            # The scrollable chat window
             with st.container(height=90, border=False):
-                st.chat_message("ai").write("Schedule verified against safety constraints.")
-            st.chat_input("Ask AI...")
+                # Check the dynamic status from your orchestrator.py
+                if audit_report["status"] == "PASSED":
+                    st.chat_message("ai").write(f"✅ **APPROVED:** {audit_report['explanation']}")
+                else:
+                    st.chat_message("ai").write(f"🛑 **VIOLATION CAUGHT:** {audit_report['explanation']}")
+            
+            # The input box stays at the bottom to complete the UI look
+            st.chat_input("Ask AI about the safety constraints...")
