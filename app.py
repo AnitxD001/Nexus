@@ -5,6 +5,10 @@ import PyPDF2
 from optimizer import optimize_production
 from orchestrator import audit_dispatch
 import time
+import requests
+import json
+import os
+import renewable
 
 # 1. PAGE SETUP (Must be first)
 st.set_page_config(page_title="Hydrogen Plant Dashboard", layout="wide", initial_sidebar_state="collapsed")
@@ -34,6 +38,7 @@ with col_left:
         target_prod = st.slider("Target Production (kg)", min_value=100, max_value=2000, value=1060, step=10)
         capacity = st.number_input("Electrolyzer Capacity (MW)", value=60.0, step=1.0)
         startup_cost = st.number_input("Startup Cost (₹)", value=15000, step=1000)
+        use_live_data = st.toggle("📡 Use Live IEX Data (Scraped)")
         
         # OEM Safety Manual Upload (RAG)
         uploaded_manual = st.file_uploader("Upload OEM Safety Manual", type=["pdf"])
@@ -56,15 +61,32 @@ with col_left:
 
 # --- THE MATH ENGINE ---
 # Hardcoded arrays from your updated optimizer
-renew_prices = [5.1,5,3.0,2.9,2.8,6,8, 6,7,8,4,3,3.5, 4.5,2.3,2.2,2.3,5,7, 5.5,3.6, float('inf'),float('inf'),float('inf'),float('inf')]
+# --- THE MATH ENGINE ---
+# 1. Base Hardcoded Arrays (Your safe fallback)
+renew_prices = renewable.generate_renewable_prices() # Get the latest renewable prices based on weather
 grid_prices = [
     3.668, 3.561, 3.430, 3.588, 3.782, 7.5,
     6.5, 4.734, 2.442, 2.758, 2.498, 2.455,
     2.084, 2.007, 2.172, 2.635, 3.117, 3.829,
-    7.300, 10.000, 7.7, 7.5, 8.5,7.5, 7.5
+    7.300, 10.000, 7.7, 7.5, 8.5, 7.5, 7.5
 ]
 
-# Run the updated optimization
+# 2. Attempt to load the dynamically scraped JSON file if the toggle is ON
+if use_live_data:
+    if os.path.exists("live_grid_data.json"):
+        try:
+            with open("live_grid_data.json", "r") as f:
+                scraped_data = json.load(f)
+                if len(scraped_data) == 24:
+                    grid_prices = scraped_data
+                    
+                    st.toast('Loaded live prices from local scraper cache!', icon='🟢')
+        except Exception:
+            st.toast('Failed to read cached data. Using fallback.', icon='🟡')
+    else:
+        st.toast('No scraped data found. Run scraper.py first!', icon='🔴')
+
+# 3. Run the updated optimization
 production, g_percent, total_cost = optimize_production(grid_prices, renew_prices, target_prod, capacity, startup_cost)
 
 # Calculate LCOH (Total Cost / Total kg Produced)
@@ -81,7 +103,7 @@ with st.spinner("AI Agent reading manual & auditing schedule..."):
 
 # Inject the calculated results back into the left sidebar slots
 cost_metric_slot.metric("Optimized Cost", f"₹ {optimized_lcoh:.2f}/kg")
-actual=279.25
+actual=243.73
 actual_metric_slot.metric("Normal Green H2 Cost", f"₹ {actual:.2f}/kg")
 safety_metric_slot.metric("Safety Status", f"{audit_report.get('violations_count', 0)} VIOLATIONS")
 
