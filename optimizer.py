@@ -1,55 +1,68 @@
-from pulp import *
+import pulp
 
-def optimize_production(freq, price, target, Pmax):
+def optimize_production(grid, renew, target, Pmax, startup_cost):
 
-    hours = len(freq)
-
-    # -------- Feature Engineering --------
-    
-    # frequency surplus
-    freq_surplus = [f - 50 for f in freq]
-    w1=-1
-    w2=1
-    startup_cost=600
-    # normalization function
-    def normalize(arr):
-        mn = min(arr)
-        mx = max(arr)
-        if mx == mn:
-            return [0]*len(arr)
-        return [(x - mn) / (mx - mn) for x in arr]
-
-    freq_norm = normalize(freq_surplus)
-    price_norm = normalize(price)
-
-    # final score
-    score = [w1*freq_norm[h] + w2*price_norm[h] for h in range(hours)]
-
-    # -------- Optimization Model --------
-    
-    model = LpProblem("Electrolyser_Optimization", LpMinimize)
-
-    P = LpVariable.dicts("Production", range(hours), 0, Pmax)
-    x = LpVariable.dicts("ON", range(hours), 0, 1, LpBinary)
-    s = LpVariable.dicts("Start", range(hours), 0, 1, LpBinary)
-
-    # objective
-    model += lpSum(score[h]*P[h] + startup_cost*s[h] for h in range(hours))
-
-    # daily production target
-    model += lpSum(P[h] for h in range(hours)) == target
-
-    # production only when ON
+    hours = 24
+    min_load = 0.1 * Pmax   # electrolyser minimum load
+    price=[]
+    # electricity price used
+    g=0
     for h in range(hours):
-        model += P[h] <= Pmax * x[h]
+        if(grid[h]<renew[h]):
+            price.append(grid[h])
+            g+=1
+        else:
+            price.append(renew[h])
 
-    # startup detection
-    model += s[0] >= x[0]
-    for h in range(1, hours):
-        model += s[h] >= x[h] - x[h-1]
+    price = [min(grid[h], renew[h]) for h in range(hours)]
 
-    model.solve(PULP_CBC_CMD(msg=0))
+    prob = pulp.LpProblem("Electrolyser_Scheduling", pulp.LpMinimize)
 
-    production = [value(P[h]) for h in range(hours)]
+    # Variables
+    x = pulp.LpVariable.dicts("ON", range(hours), cat="Binary")
+    P = pulp.LpVariable.dicts("Production", range(hours), lowBound=0)
+    s = pulp.LpVariable.dicts("Startup", range(hours), cat="Binary")
 
-    return production
+    # Objective
+    prob += pulp.lpSum(price[h] * P[h]*50 for h in range(hours)) \
+            + startup_cost * pulp.lpSum(s[h] for h in range(hours))
+
+    # Hydrogen production target
+    prob += pulp.lpSum(P[h] for h in range(hours)) == target
+
+    for h in range(hours):
+
+        # production limits
+        prob += P[h] <= Pmax * x[h]
+        prob += P[h] >= min_load * x[h]
+
+        # startup detection
+        if h == 0:
+            prob += s[h] >= x[h]
+        else:
+            prob += s[h] >= x[h] - x[h-1]
+            prob += s[h] <= x[h]
+            prob += s[h] <= 1 - x[h-1]
+
+    # Solve
+    prob.solve(pulp.PULP_CBC_CMD(msg=0))
+
+    production = [P[h].varValue for h in range(hours)]
+    g=(g/24)*100
+    s=sum(production[h]*50*price[h] for h in range(hours))
+    return production, g, s
+renew = [
+3.2,5,3.0,2.9,2.8,2.6,
+2.3,2.1,2.0,1.9,1.8,1.7,
+1.7,1.8,2.0,2.2,2.5,2.9,
+3.3,3.6,float('inf'),float('inf'),float('inf'),float('inf')
+]
+
+grid = [
+3.2,4,2.8,2.7,2.9,4.2,
+4.2,5.0,5.5,5.8,5.6,5.2,
+4.8,4.5,4.3,4.7,5.4,6.0,
+6.5,6.2,5.6,3,2,2.5
+]
+
+print(optimize_production(grid, renew, target=1060, Pmax=60, startup_cost = 15000))
