@@ -1,7 +1,7 @@
 """AI Safety Agent (Orchestrator)
 
 This module audits a 24-hour, day-ahead dispatch schedule using the
-Google Gemini API (gemini-1.5-flash) and returns a strict JSON object
+Google Gemini API (gemini-2.5-flash) and returns a strict JSON object
 that the Streamlit UI can safely render. It uses Direct RAG to read 
 from an uploaded PDF manual.
 """

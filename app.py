@@ -4,6 +4,7 @@ from plotly.subplots import make_subplots
 import PyPDF2
 from optimizer import optimize_production
 from orchestrator import audit_dispatch
+import time
 
 # 1. PAGE SETUP (Must be first)
 st.set_page_config(page_title="Hydrogen Plant Dashboard", layout="wide", initial_sidebar_state="collapsed")
@@ -50,12 +51,18 @@ with col_left:
         
         # Create empty UI slots to fill AFTER the math runs
         cost_metric_slot = st.empty()
+        actual_metric_slot = st.empty()
         safety_metric_slot = st.empty()
 
 # --- THE MATH ENGINE ---
 # Hardcoded arrays from your updated optimizer
-renew_prices = [3.2,5,3.0,2.9,2.8,2.6, 2.3,2.1,2.0,10,1.8,1.7, 1.7,1.8,2.0,2.2,2.5,2.9, 3.3,3.6, float('inf'),float('inf'),float('inf'),float('inf')]
-grid_prices = [3.2,4,2.8,2.7,2.9,4.2, 4.2,5.0,5.5,9,5.6,5.2, 4.8,4.5,4.3,4.7,5.4,6.0, 6.5,6.2,5.6,3,2,2.5]
+renew_prices = [5.1,5,3.0,2.9,2.8,6,8, 6,7,8,4,3,3.5, 4.5,2.3,2.2,2.3,5,7, 5.5,3.6, float('inf'),float('inf'),float('inf'),float('inf')]
+grid_prices = [
+    3.668, 3.561, 3.430, 3.588, 3.782, 7.5,
+    6.5, 4.734, 2.442, 2.758, 2.498, 2.455,
+    2.084, 2.007, 2.172, 2.635, 3.117, 3.829,
+    7.300, 10.000, 7.7, 7.5, 8.5,7.5, 7.5
+]
 
 # Run the updated optimization
 production, g_percent, total_cost = optimize_production(grid_prices, renew_prices, target_prod, capacity, startup_cost)
@@ -74,6 +81,8 @@ with st.spinner("AI Agent reading manual & auditing schedule..."):
 
 # Inject the calculated results back into the left sidebar slots
 cost_metric_slot.metric("Optimized Cost", f"₹ {optimized_lcoh:.2f}/kg")
+actual=279.25
+actual_metric_slot.metric("Normal Green H2 Cost", f"₹ {actual:.2f}/kg")
 safety_metric_slot.metric("Safety Status", f"{audit_report.get('violations_count', 0)} VIOLATIONS")
 
 
@@ -85,53 +94,91 @@ with col_right:
     
     with st.container(border=True):
         hours = list(range(24))
+        
+        valid_renew = [r for r in renew_plot if r is not None]
+        max_price = max(max(grid_prices), max(valid_renew) if valid_renew else 0) + 1
+        
         fig = make_subplots(specs=[[{"secondary_y": True}]])
         
-        # Trace 1: Grid Price (Red Line)
-        fig.add_trace(
-            go.Scatter(x=hours, y=grid_prices, name="Grid Price (₹/kWh)", line=dict(color="#ef4444", width=2)),
-            secondary_y=False,
-        )
-        # Trace 2: Renewable Price (Blue Line) - Note it breaks at night due to 'None'
-        fig.add_trace(
-            go.Scatter(x=hours, y=renew_plot, name="Renewable Price (₹/kWh)", line=dict(color="#3b82f6", width=2)),
-            secondary_y=False,
-        )
-        # Trace 3: LP Optimized Dispatch Status
-        fig.add_trace(
-            go.Scatter(x=hours, y=lp_dispatch_frac, name="Electrolyzer Load", line=dict(color="#10b981", shape='hv', width=3, dash='dot')),
-            secondary_y=True,
+        # 1. Base Traces (We start them empty)
+        fig.add_trace(go.Scatter(x=[], y=[], name="Grid Price (₹/kWh)", line=dict(color="#ef4444", width=2)), secondary_y=False)
+        fig.add_trace(go.Scatter(x=[], y=[], name="Renewable Price (₹/kWh)", line=dict(color="#3b82f6", width=2)), secondary_y=False)
+        fig.add_trace(go.Scatter(x=[], y=[], name="Electrolyzer Load", line=dict(color="#10b981", shape='hv', width=3, dash='dot')), secondary_y=True)
+        
+        # 2. Create the Animation Frames (Pre-packaging the data for the browser)
+        frames = []
+        for i in range(1, 25):
+            frames.append(go.Frame(data=[
+                go.Scatter(x=hours[:i], y=grid_prices[:i]),
+                go.Scatter(x=hours[:i], y=renew_plot[:i]),
+                go.Scatter(x=hours[:i], y=lp_dispatch_frac[:i])
+            ]))
+        fig.frames = frames
+        
+        # 3. Add the "Play" Button and Lock Axes
+        fig.update_layout(
+            template="plotly_dark", margin=dict(l=0, r=0, t=50, b=0), height=350,
+            hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            xaxis=dict(range=[0, 23], title="Hour of Day"),
+            yaxis=dict(range=[0, max_price]),
+            # This block creates the Play button on the chart!
+            updatemenus=[dict(
+                type="buttons",
+                showactive=False,
+                y=1.2,
+                x=0,
+                xanchor="left",
+                yanchor="bottom",
+                buttons=[dict(
+                    label="▶ Play Simulation",
+                    method="animate",
+                    args=[None, dict(frame=dict(duration=50, redraw=True), transition=dict(duration=0), fromcurrent=True, mode="immediate")]
+                )]
+            )]
         )
         
-        fig.update_layout(
-            template="plotly_dark", margin=dict(l=0, r=0, t=30, b=0), height=350,
-            hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-        )
         fig.update_yaxes(title_text="Price (₹/kWh)", secondary_y=False)
         fig.update_yaxes(title_text="Load %", secondary_y=True, range=[0, 1.2], showgrid=False)
+        
+        # Render normally (No Streamlit loop needed!)
         st.plotly_chart(fig, use_container_width=True)
-
     # --- BOTTOM RIGHT CARDS ---
-    bot1, bot2, bot3, bot4 = st.columns([1, 1, 1, 2.5])
+    # --- BOTTOM RIGHT CARDS ---
+    # We are switching from 4 columns to 3 columns to give everything more breathing room
+    bot1, bot2, bot3 = st.columns([1.2, 1, 2.5])
     
     with bot1:
         with st.container(border=True):
             st.markdown("<p style='font-size: 14px; color: #a1a1aa; margin-bottom: 0;'>Power Source</p>", unsafe_allow_html=True)
-            # DYNAMIC DONUT: 100-g is Renewable%, g is Grid%
+            
+            # Made the Donut chart bigger (height 180) and turned on the legend
             donut = go.Figure(data=[go.Pie(labels=['Renewable', 'Grid'], values=[100 - g_percent, g_percent], hole=.6, marker_colors=["#10b981", "#cbd5e1"])])
-            donut.update_layout(showlegend=False, margin=dict(l=0, r=0, t=10, b=10), height=100, template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)")
+            donut.update_layout(
+                showlegend=True, 
+                legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="center", x=0.5), # Legend placed neatly below
+                margin=dict(l=0, r=0, t=10, b=30), 
+                height=180, # Increased height to match Chatbot
+                template="plotly_dark", 
+                paper_bgcolor="rgba(0,0,0,0)"
+            )
             st.plotly_chart(donut, use_container_width=True)
             
     with bot2:
         with st.container(border=True):
-            # Show the absolute total cost (variable 's' from your math)
-            st.metric("Total Plant Cost", f"₹ {total_cost:,.0f}")
+            # --- CO2 MATH ---
+            # 50 kWh per 1 kg H2. Grid emits 0.82 kg CO2 per kWh.
+            grid_h2_produced = target_prod * (g_percent / 100)
+            co2_emitted = (grid_h2_produced * 50) * 0.71
+            
+            #baseline_co2 = (target_prod * 50) * 0.82 # Emissions if 100% grid
+            co2_saved = target_prod*30
+            
+            # Stacked metrics look incredibly professional
+            st.metric("Optimised CO₂ Emission", f"{co2_emitted:,.0f} kg")
+            st.divider() # Adds a clean line between the two metrics
+            st.metric("Normal CO2 emission for electrolysis", f"{co2_saved:,.0f} kg")
             
     with bot3:
-        with st.container(border=True):
-            st.metric("Hydrogen Produced", f"{target_prod} kg")
-            
-    with bot4:
         with st.container(border=True):
             st.markdown("<p style='font-size: 14px; color: #a1a1aa; margin-bottom: 0;'>AI Safety Agent (RAG)</p>", unsafe_allow_html=True)
             with st.container(height=180, border=False):

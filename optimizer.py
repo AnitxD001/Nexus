@@ -7,12 +7,6 @@ def optimize_production(grid, renew, target, Pmax, startup_cost):
     price=[]
     # electricity price used
     g=0
-    for h in range(hours):
-        if(grid[h]<renew[h]):
-            price.append(grid[h])
-            g+=1
-        else:
-            price.append(renew[h])
 
     price = [min(grid[h], renew[h]) for h in range(hours)]
 
@@ -48,20 +42,26 @@ def optimize_production(grid, renew, target, Pmax, startup_cost):
     prob.solve(pulp.PULP_CBC_CMD(msg=0))
 
     production = [P[h].varValue for h in range(hours)]
-    g=(g/24)*100
+    tot=0
+    for i in range(len(production)):
+        if production[i]>0:
+            if(grid[i]==price[i]):
+                g+=1
+            tot+=1
+    g=(g/tot)*100
     s=sum(production[h]*50*price[h] for h in range(hours))
     return production, g, s
 renew = [
 3.2,5,3.0,2.9,2.8,2.6,
 2.3,2.1,2.0,1.9,1.8,1.7,
-1.7,1.8,2.0,2.2,2.5,2.9,
+3.1,6,5,4.4,4.5,2.9,
 3.3,3.6,float('inf'),float('inf'),float('inf'),float('inf')
 ]
 
 grid = [
 3.2,4,2.8,2.7,2.9,4.2,
 4.2,5.0,5.5,5.8,5.6,5.2,
-4.8,4.5,4.3,4.7,5.4,6.0,
+4.8,7,4.3,2,3,6.0,
 6.5,6.2,5.6,3,2,2.5
 ]
 
