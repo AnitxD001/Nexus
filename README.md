@@ -168,7 +168,14 @@ A system where every electrolyzer runs:
 
 **not continuously, but optimally.**
 
-made with love and loneliness by team: Why are we Here
-Anitketan Suin
-Chitrak Saha
-Shubhom Mallick
+---
+
+## ❤️ Credits
+
+Made with love and loneliness by  
+
+**Team: Why are we Here**
+
+- Anitketan Suin  
+- Chitrak Saha  
+- Shubhom Mallick
