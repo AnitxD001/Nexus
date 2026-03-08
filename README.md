@@ -167,3 +167,8 @@ Our goal is to build the **operating system for intelligent hydrogen plants.**
 A system where every electrolyzer runs:
 
 **not continuously, but optimally.**
+
+made with love and loneliness by team: Why are we Here
+Anitketan Suin
+Chitrak Saha
+Shubhom Mallick
