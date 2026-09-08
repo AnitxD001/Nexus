@@ -4,7 +4,8 @@ from plotly.subplots import make_subplots
 import PyPDF2
 from optimizer import optimize_production
 from orchestrator import audit_dispatch
-import time
+import renewable
+from grid_mlr import predict_grid_prices
 
 # 1. PAGE SETUP (Must be first)
 st.set_page_config(page_title="Hydrogen Plant Dashboard", layout="wide", initial_sidebar_state="collapsed")
@@ -31,7 +32,7 @@ with col_left:
         st.markdown("<h4 style='text-align: center; color: #a1a1aa;'>Control Panel</h4>", unsafe_allow_html=True)
         
         # Interactive Inputs 
-        target_prod = st.slider("Target Production (kg)", min_value=100, max_value=2000, value=1060, step=10)
+        target_prod = st.slider("Target Production (kg)", min_value=100, max_value=2000, value=1200, step=10)
         capacity = st.number_input("Electrolyzer Capacity (MW)", value=60.0, step=1.0)
         startup_cost = st.number_input("Startup Cost (₹)", value=15000, step=1000)
         
@@ -55,14 +56,9 @@ with col_left:
         safety_metric_slot = st.empty()
 
 # --- THE MATH ENGINE ---
-# Hardcoded arrays from your updated optimizer
-renew_prices = [5.1,5,3.0,2.9,2.8,6,8, 6,7,8,4,3,3.5, 4.5,2.3,2.2,2.3,5,7, 5.5,3.6, float('inf'),float('inf'),float('inf'),float('inf')]
-grid_prices = [
-    3.668, 3.561, 3.430, 3.588, 3.782, 7.5,
-    6.5, 4.734, 2.442, 2.758, 2.498, 2.455,
-    2.084, 2.007, 2.172, 2.635, 3.117, 3.829,
-    7.300, 10.000, 7.7, 7.5, 8.5,7.5, 7.5
-]
+# Dynamic price generation using renewable forecast and Multiple Linear Regression (MLR)
+renew_prices = renewable.generate_renewable_prices()
+grid_prices, mlr_info = predict_grid_prices()
 
 # Run the updated optimization
 production, g_percent, total_cost = optimize_production(grid_prices, renew_prices, target_prod, capacity, startup_cost)
@@ -81,9 +77,19 @@ with st.spinner("AI Agent reading manual & auditing schedule..."):
 
 # Inject the calculated results back into the left sidebar slots
 cost_metric_slot.metric("Optimized Cost", f"₹ {optimized_lcoh:.2f}/kg")
-actual=279.25
+actual=243.73
 actual_metric_slot.metric("Normal Green H2 Cost", f"₹ {actual:.2f}/kg")
 safety_metric_slot.metric("Safety Status", f"{audit_report.get('violations_count', 0)} VIOLATIONS")
+
+with col_left:
+    with st.expander("📈 Grid Price MLR Model", expanded=False):
+        st.markdown(f"**Dataset Source:** `{mlr_info.get('dataset_source', 'N/A')}`")
+        st.markdown(f"**Training Samples:** `{mlr_info.get('sample_count', 0):,} hours (1 year)`")
+        st.markdown(f"**R² Score:** `{mlr_info['r2_score']}`")
+        st.markdown(f"**MAE:** `₹ {mlr_info['mae']:.2f}/kWh`")
+        st.markdown("**Feature Coefficients (β):**")
+        for feat, coef in mlr_info["coefficients"].items():
+            st.text(f"• {feat}: {coef}")
 
 
 # ==========================================
