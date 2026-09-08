@@ -34,3 +34,4 @@ def generate_renewable_prices(lat=22.57, lon=88.36):   # default: Kolkata
 
 
 print(generate_renewable_prices())
+    
