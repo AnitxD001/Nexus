@@ -113,36 +113,43 @@ def audit_dispatch(dispatch_status: List[int], manual_text: str) -> Dict:
     }}
     """
 
-    # 3. Call Gemini (Using correct SDK syntax)
-    try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        response = model.generate_content(
-            prompt,
-            generation_config={"response_mime_type": "application/json"}
-        )
-        
-        parsed = json.loads(response.text)
+    # 3. Call Gemini (Using correct SDK syntax with multi-model fallback)
+    candidate_models = ['gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-flash']
+    last_error = None
 
-        if not all(k in parsed for k in ("status", "violations_count", "explanation")):
-            raise ValueError("Malformed JSON from AI")
+    for model_name in candidate_models:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(
+                prompt,
+                generation_config={"response_mime_type": "application/json"}
+            )
+            
+            parsed = json.loads(response.text)
 
-        parsed["violations_count"] = int(parsed["violations_count"])
-        parsed["status"] = str(parsed["status"]).upper()
-        parsed["explanation"] = str(parsed["explanation"]).strip()
-        
-        return parsed
+            if not all(k in parsed for k in ("status", "violations_count", "explanation")):
+                raise ValueError("Malformed JSON from AI")
 
-    except Exception as exc:
-        print(f"API Error: {exc}") # Prints to your terminal so you can debug without breaking the UI
-        fallback_local = _local_validate(dispatch_status)
-        return {
-            "status": fallback_local.get("status", "FAILED"),
-            "violations_count": fallback_local.get("violations_count", -1),
-            "explanation": (
-                "API offline. Using local safety fallback. "
-                + (fallback_local.get("explanation", ""))
-            )[:200],
-        }
+            parsed["violations_count"] = int(parsed["violations_count"])
+            parsed["status"] = str(parsed["status"]).upper()
+            parsed["explanation"] = str(parsed["explanation"]).strip()
+            
+            return parsed
+        except Exception as exc:
+            last_error = exc
+            continue
+
+    print(f"API Error: {last_error}") # Prints to your terminal so you can debug without breaking the UI
+    fallback_local = _local_validate(dispatch_status)
+    return {
+        "status": fallback_local.get("status", "FAILED"),
+        "violations_count": fallback_local.get("violations_count", -1),
+        "explanation": (
+            "API offline. Using local safety fallback. "
+            + (fallback_local.get("explanation", ""))
+        )[:200],
+    }
+
 
 def chat_with_manual(user_message: str, manual_text: str) -> str:
     """Handles the RAG chatbot conversation with strict guardrails."""
@@ -168,7 +175,7 @@ def chat_with_manual(user_message: str, manual_text: str) -> str:
     
     try:
         # Using 1.5-flash to keep you safely away from the 2.5 rate limits!
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = genai.GenerativeModel('gemini-3.5-flash-lite')
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
